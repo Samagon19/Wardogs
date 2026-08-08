@@ -2,9 +2,10 @@
 """
 Beobachtet einen X-(Twitter-)Account und schickt neue Posts an einen Discord-Webhook.
 
-Kein API-Key noetig. Zwei Quellen, in dieser Reihenfolge:
-  1. syndication.twitter.com -> echte Post-IDs, Text und Bild
-  2. api.fxtwitter.com       -> nur der Post-Zaehler (funktioniert auch von Cloud-IPs)
+Kein API-Key noetig. Drei Quellen, in dieser Reihenfolge:
+  1. Nitter-RSS              -> Post-ID, Text und Bild
+  2. syndication.twitter.com -> dasselbe, liefert aktuell meist nur 429
+  3. api.fxtwitter.com       -> nur der Post-Zaehler, Meldung ohne Inhalt
 
 Konfiguration ueber Umgebungsvariablen:
   DISCORD_WEBHOOK    (Pflicht)  Webhook-URL des Discord-Kanals
@@ -12,6 +13,8 @@ Konfiguration ueber Umgebungsvariablen:
   MAX_POSTS          (optional) Hoechstzahl Meldungen pro Lauf, Standard: 5
   TIMELINE_RETRIES   (optional) Nachfass-Versuche bei erkanntem Post, Standard: 5
   TIMELINE_PAUSE     (optional) Sekunden zwischen den Versuchen, Standard: 20
+  NITTER_HOSTS       (optional) Instanzen mit Komma getrennt, Standard: nitter.net
+  INCLUDE_RETWEETS   (optional) 1 = Retweets mitmelden, Standard: 0
 """
 
 import json
@@ -21,15 +24,21 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
+from html import unescape
 from pathlib import Path
+from urllib.parse import unquote
 
 HANDLE = os.environ.get("X_HANDLE", "WARDOGS").strip().lstrip("@")
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK", "").strip()
 MAX_POSTS = int(os.environ.get("MAX_POSTS", "5"))
 TIMELINE_RETRIES = int(os.environ.get("TIMELINE_RETRIES", "5"))
 TIMELINE_PAUSE = int(os.environ.get("TIMELINE_PAUSE", "20"))
+NITTER_HOSTS = [h.strip() for h in os.environ.get("NITTER_HOSTS", "nitter.net").split(",") if h.strip()]
+INCLUDE_RETWEETS = os.environ.get("INCLUDE_RETWEETS", "0") == "1"
 STATE_FILE = Path(__file__).resolve().parent / "state.json"
+DC = {"dc": "http://purl.org/dc/elements/1.1/"}
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -94,8 +103,75 @@ def timeline():
     return [as_post(tweet) for tweet in newest_first]
 
 
+def html_to_text(fragment):
+    """Nitters HTML-Beschreibung in lesbaren Text - echte Ziele statt Kurztext."""
+    text = re.sub(r"<br\s*/?>", "\n", fragment).replace("</p>", "\n")
+
+    def link(match):
+        ziel, beschriftung = match.group(1), re.sub(r"<[^>]+>", "", match.group(2))
+        # Erwaehnungen und Hashtags zeigen auf die Instanz - da ist der Text besser
+        return beschriftung if "nitter" in ziel or ziel.startswith("/") else ziel
+
+    text = re.sub(r'<a href="([^"]*)"[^>]*>(.*?)</a>', link, text, flags=re.S)
+    text = unescape(re.sub(r"<[^>]+>", "", text))
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def first_image(fragment):
+    """Erstes Bild, ueber den Instanz-Proxy hinweg auf das Original gezogen."""
+    match = re.search(r'<img src="([^"]+)"', fragment)
+    if not match:
+        return None
+    quelle = unescape(match.group(1))
+    proxy = re.search(r"/pic/(?:orig/)?(.+)$", quelle)
+    return "https://pbs.twimg.com/" + unquote(proxy.group(1)) if proxy else quelle
+
+
+def parse_nitter(feed):
+    posts = []
+    for item in ET.fromstring(feed).findall("./channel/item"):
+        kennung = re.search(r"/status/(\d+)", item.findtext("link") or "")
+        if not kennung:
+            continue
+        urheber = (item.findtext("dc:creator", namespaces=DC) or "").lstrip("@")
+        beschreibung = item.findtext("description") or ""
+        text = html_to_text(beschreibung)
+        # Zwei Formen von Retweet: fremder Urheber, oder eigener Eintrag mit "RT @"
+        retweet = urheber.lower() != HANDLE.lower() or text.startswith("RT @")
+        if retweet and not INCLUDE_RETWEETS:
+            continue
+        posts.append(
+            {
+                "id": kennung.group(1),
+                "text": text,
+                "created_at": item.findtext("pubDate") or "",
+                "image": first_image(beschreibung),
+                "url": f"https://x.com/{urheber or HANDLE}/status/{kennung.group(1)}",
+            }
+        )
+    posts.sort(key=lambda post: int(post["id"]), reverse=True)
+    return posts
+
+
+def nitter_timeline():
+    for host in NITTER_HOSTS:
+        try:
+            posts = parse_nitter(fetch(f"https://{host}/{HANDLE}/rss", "application/rss+xml"))
+        except Exception as error:
+            print(f"Nitter {host} nicht verfuegbar: {error}")
+            continue
+        if posts:
+            print(f"Nitter {host}: {len(posts)} Posts gelesen")
+            return posts
+        print(f"Nitter {host}: Feed ohne verwertbare Posts")
+    return []
+
+
 def read_timeline():
-    """timeline() ohne Ausnahmen - leere Liste, wenn die Quelle gerade blockt."""
+    """Beste verfuegbare Inhaltsquelle - leere Liste, wenn alle blocken."""
+    posts = nitter_timeline()
+    if posts:
+        return posts
     try:
         posts = timeline()
         print(f"Timeline: {len(posts)} Posts gelesen")

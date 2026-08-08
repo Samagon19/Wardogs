@@ -11,8 +11,16 @@ zuletzt gemerkten Stand in `state.json`. Zwei Quellen, in dieser Reihenfolge:
 
 | Quelle | Liefert | Anmerkung |
 | --- | --- | --- |
-| `syndication.twitter.com` | Post-ID, Text, Bild | Twitters eigener Embed-Endpunkt, kein Login. Cloud-IPs bekommen manchmal ein Rate-Limit. |
-| `api.fxtwitter.com` | Post-Zähler | Fallback. Steigt der Zähler, kommt eine Meldung mit Profil-Link (ohne Text). |
+| Nitter-RSS (`nitter.net`) | Post-ID, Text, Bild | Erste Wahl. Weitere Instanzen lassen sich über `NITTER_HOSTS` als Reserve angeben. |
+| `syndication.twitter.com` | dasselbe | Twitters eigener Embed-Endpunkt, kein Login. Antwortet zurzeit fast durchgehend mit `429`. |
+| `api.fxtwitter.com` | Post-Zähler | Letzte Rettung. Steigt der Zähler, kommt eine Meldung mit Profil-Link, aber ohne Text. |
+
+**Retweets werden standardmäßig ignoriert.** Bei aktiven Accounts sind sie die
+deutliche Mehrheit im Feed – bei @WARDOGS aktuell 17 von 20 Einträgen. Mit
+`INCLUDE_RETWEETS=1` kommen sie mit. Kleine Einschränkung dabei: Der Watcher
+vergleicht Post-IDs, und ein Retweet trägt die ID des *ursprünglichen* Posts. Wird
+etwas Älteres geteilt, kann die Meldung ausbleiben. Für eigene Posts stimmt der
+Vergleich immer.
 
 Das Rate-Limit der Timeline gilt nur zeitweise. Meldet der Zähler einen neuen Post,
 die Timeline blockt aber gerade, fragt der Watcher sie deshalb noch bis zu fünfmal im
@@ -72,9 +80,14 @@ Bestätigung („Überwachung ist aktiv"). Ab dem zweiten Lauf kommen echte Post
 - **Anderer Takt:** den `cron`-Ausdruck in derselben Datei anpassen.
 - **Mehr/weniger Meldungen pro Lauf:** `MAX_POSTS` als `env` ergänzen (Standard 5).
   Schützt davor, dass ein Nachhol-Lauf 20 Meldungen auf einmal feuert.
-- **Nachfassen bei blockierter Timeline:** `TIMELINE_RETRIES` (Standard 5) und
+- **Nachfassen bei blockierten Quellen:** `TIMELINE_RETRIES` (Standard 5) und
   `TIMELINE_PAUSE` in Sekunden (Standard 20). Höhere Werte erhöhen die Chance auf
   Text und Bild in der Meldung, verlängern aber den Lauf.
+- **Nitter-Instanzen:** `NITTER_HOSTS`, mit Komma getrennt, in Reihenfolge der
+  Bevorzugung – z. B. `nitter.net,nitter.privacydev.net`. Die erste Instanz, die
+  brauchbare Posts liefert, gewinnt. Nützlich, falls `nitter.net` ausfällt; eine
+  aktuelle Liste erreichbarer Instanzen findet sich im Nitter-Wiki.
+- **Retweets mitmelden:** `INCLUDE_RETWEETS=1` (siehe Einschränkung oben).
 
 ## Lokal testen
 
