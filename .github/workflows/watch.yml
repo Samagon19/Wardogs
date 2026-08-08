@@ -1,0 +1,44 @@
+name: WARDOGS Watcher
+
+on:
+  schedule:
+    # Alle 5 Minuten. GitHub kann Cron-Läufe bei Last verzögern (real oft 5-20 Min).
+    - cron: "*/5 * * * *"
+  workflow_dispatch: # erlaubt manuelles Auslösen über den Actions-Tab
+
+permissions:
+  contents: write # nötig, damit state.json zurück ins Repo committet werden kann
+
+concurrency:
+  group: wardogs-watcher
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Auf neue Posts prüfen
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          X_HANDLE: WARDOGS
+        run: python watcher.py
+
+      - name: Stand sichern
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain state.json)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state.json
+            git commit -m "state: $(date -u +%FT%TZ)"
+            git pull --rebase --autostash || true
+            git push
+          else
+            echo "Keine Änderung am Stand."
+          fi
