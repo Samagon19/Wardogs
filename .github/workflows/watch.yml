@@ -27,9 +27,7 @@ jobs:
       - name: Auf neue Posts prüfen
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          # TESTBETRIEB: Reuters postet etwa alle 12 Minuten, damit sich die
-          # Zustellung schnell pruefen laesst. Danach zurueck auf WARDOGS.
-          X_HANDLE: Reuters
+          X_HANDLE: WARDOGS
           # Tempo vor Inhalt: der Zaehler loest sofort aus, Text und Bild
           # entfallen. Alle 15 Sekunden pruefen, und zwar 50 Mal - ein Job
           # deckt damit rund 12 Minuten ab. Weil GitHub pro concurrency-Gruppe
