@@ -26,7 +26,9 @@ jobs:
       - name: Auf neue Posts prüfen
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-          X_HANDLE: WARDOGS
+          # TESTBETRIEB: Reuters postet etwa alle 12 Minuten, damit sich die
+          # Zustellung schnell pruefen laesst. Danach zurueck auf WARDOGS.
+          X_HANDLE: Reuters
         run: python watcher.py
 
       - name: Stand sichern
