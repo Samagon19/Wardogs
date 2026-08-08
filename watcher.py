@@ -2,14 +2,25 @@
 """
 Beobachtet einen X-(Twitter-)Account und schickt neue Posts an einen Discord-Webhook.
 
-Kein API-Key noetig. Drei Quellen, in dieser Reihenfolge:
-  1. Nitter-RSS              -> Post-ID, Text und Bild
-  2. syndication.twitter.com -> dasselbe, liefert aktuell meist nur 429
-  3. api.fxtwitter.com       -> nur der Post-Zaehler, Meldung ohne Inhalt
+Kein API-Key noetig. Zwei Betriebsarten, umschaltbar ueber NOTIFY_MODE:
+
+  fast  (Standard)  api.fxtwitter.com liefert den Beitragszaehler. Steigt er,
+                    geht sofort eine Meldung raus - ohne Text und Bild, dafuer
+                    binnen ein bis zwei Minuten. Zaehlt auch Retweets mit.
+  rich              Nitter-RSS, ersatzweise syndication.twitter.com. Meldung
+                    mit Text und Bild und ohne Retweets, dafuer erst wenn der
+                    Feed nachgezogen hat - erfahrungsgemaess 10 bis 25 Minuten.
 
 Konfiguration ueber Umgebungsvariablen:
   DISCORD_WEBHOOK    (Pflicht)  Webhook-URL des Discord-Kanals
   X_HANDLE           (optional) Account ohne @, Standard: WARDOGS
+  NOTIFY_MODE        (optional) fast oder rich, Standard: fast
+
+  Nur fast:
+  CHECK_LOOPS        (optional) Pruefungen je Job-Lauf, Standard: 5
+  CHECK_PAUSE        (optional) Sekunden zwischen den Pruefungen, Standard: 60
+
+  Nur rich:
   MAX_POSTS          (optional) Hoechstzahl Meldungen pro Lauf, Standard: 5
   TIMELINE_RETRIES   (optional) Nachfass-Versuche bei erkanntem Post, Standard: 5
   TIMELINE_PAUSE     (optional) Sekunden zwischen den Versuchen, Standard: 20
@@ -37,6 +48,9 @@ TIMELINE_RETRIES = int(os.environ.get("TIMELINE_RETRIES", "5"))
 TIMELINE_PAUSE = int(os.environ.get("TIMELINE_PAUSE", "20"))
 NITTER_HOSTS = [h.strip() for h in os.environ.get("NITTER_HOSTS", "nitter.net").split(",") if h.strip()]
 INCLUDE_RETWEETS = os.environ.get("INCLUDE_RETWEETS", "0") == "1"
+NOTIFY_MODE = os.environ.get("NOTIFY_MODE", "fast").strip().lower()
+CHECK_LOOPS = max(1, int(os.environ.get("CHECK_LOOPS", "5")))
+CHECK_PAUSE = int(os.environ.get("CHECK_PAUSE", "60"))
 STATE_FILE = Path(__file__).resolve().parent / "state.json"
 DC = {"dc": "http://purl.org/dc/elements/1.1/"}
 
@@ -252,10 +266,49 @@ def save_state(state):
     STATE_FILE.write_text(json.dumps(state, indent=2) + "\n", "utf-8")
 
 
-def main():
-    if not WEBHOOK:
-        sys.exit("DISCORD_WEBHOOK ist nicht gesetzt - Secret in den Repo-Settings anlegen.")
+def schnell_pruefen(state):
+    """Nur der Zaehler. Schnellste Erkennung, dafuer ohne Text und Bild.
 
+    Der Zaehler zaehlt jede Aktivitaet - eigene Posts, Retweets, Antworten.
+    Wer nur eigene Posts will, braucht NOTIFY_MODE=rich.
+    Gibt den fortgeschriebenen Stand zurueck, oder None bei Ausfall.
+    """
+    try:
+        prof = profile()
+    except Exception as error:
+        print(f"Profil nicht verfuegbar: {error} - Runde uebersprungen")
+        return None
+    print(f"Profil: {prof['count']} Beitraege insgesamt")
+
+    if not state:
+        send(
+            {
+                "content": f"✅ Überwachung von **@{HANDLE}** ist aktiv (Schnellmodus) - "
+                f"ab jetzt meldet sich der Watcher bei jeder neuen Aktivität, "
+                f"Retweets eingeschlossen.\nhttps://x.com/{HANDLE}"
+            }
+        )
+        print("Erster Lauf - Ausgangszustand gespeichert.")
+        return {"handle": HANDLE, "last_id": None, "count": prof["count"]}
+
+    vorher = state.get("count")
+    if vorher is not None and prof["count"] > vorher:
+        zuwachs = prof["count"] - vorher
+        send(
+            {
+                "content": f"\U0001f514 **@{HANDLE}** hat {zuwachs} neue(n) Beitrag "
+                f"veroeffentlicht.\nhttps://x.com/{HANDLE}"
+            }
+        )
+        print(f"gemeldet ueber Zaehler: +{zuwachs}")
+
+    state["count"] = prof["count"]
+    state["handle"] = HANDLE
+    return state
+
+
+def ausfuehrlich_pruefen():
+    """Inhalte aus dem Feed - traeger, dafuer mit Text, Bild und ohne Retweets."""
     state = load_state()
     first_run = not state
 
@@ -342,6 +395,28 @@ def main():
         state["count"] = prof["count"]
     state["handle"] = HANDLE
     save_state(state)
+
+
+def main():
+    if not WEBHOOK:
+        sys.exit("DISCORD_WEBHOOK ist nicht gesetzt - Secret in den Repo-Settings anlegen.")
+
+    if NOTIFY_MODE != "fast":
+        ausfuehrlich_pruefen()
+        return
+
+    # Ein Zaehler-Abruf dauert Sekunden. Statt auf den naechsten Cron-Lauf zu
+    # warten, prueft ein Job mehrfach - so haengt die Reaktionszeit an
+    # CHECK_PAUSE und nicht an GitHubs Warteschlange.
+    state = load_state()
+    for runde in range(1, CHECK_LOOPS + 1):
+        if runde > 1:
+            time.sleep(CHECK_PAUSE)
+        print(f"--- Runde {runde}/{CHECK_LOOPS}")
+        aktuell = schnell_pruefen(state)
+        if aktuell is not None:
+            state = aktuell
+            save_state(state)
 
 
 if __name__ == "__main__":

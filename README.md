@@ -6,29 +6,46 @@ Kein X-API-Key, keine Bezahl-Dienste, keine Abhängigkeiten.
 
 ## Wie es funktioniert
 
-Alle 5 Minuten holt sich `watcher.py` die neuesten Posts und vergleicht sie mit dem
-zuletzt gemerkten Stand in `state.json`. Zwei Quellen, in dieser Reihenfolge:
+`watcher.py` vergleicht den aktuellen Zustand des Accounts mit dem zuletzt gemerkten
+Stand in `state.json`. Es gibt zwei Betriebsarten, umschaltbar über `NOTIFY_MODE`:
+
+### `fast` – Tempo vor Inhalt (aktuell eingestellt)
+
+`api.fxtwitter.com` liefert den Beitragszähler des Profils. Steigt er, geht sofort
+eine kurze Meldung mit Profil-Link raus. Der Zähler ist praktisch in Echtzeit aktuell,
+und weil ein Abruf nur Sekunden dauert, prüft **ein Job fünfmal im Minutentakt** statt
+nur einmal – die Reaktionszeit hängt damit an `CHECK_PAUSE` und nicht an GitHubs
+Cron-Warteschlange. Von Post bis Discord vergeht so meist unter zwei Minuten.
+
+Der Preis: kein Text, kein Bild. Und der Zähler zählt **jede** Aktivität, also auch
+Retweets und Antworten. Bei einem Account, der viel teilt, wird das schnell laut –
+bei @WARDOGS sind 17 von 20 Feed-Einträgen Retweets.
+
+### `rich` – Inhalt vor Tempo
+
+Liest den Feed und meldet mit Text, Bild, Zeitstempel und Link, Retweets
+herausgefiltert. Quellen in dieser Reihenfolge:
 
 | Quelle | Liefert | Anmerkung |
 | --- | --- | --- |
-| Nitter-RSS (`nitter.net`) | Post-ID, Text, Bild | Erste Wahl. Weitere Instanzen lassen sich über `NITTER_HOSTS` als Reserve angeben. |
+| Nitter-RSS (`nitter.net`) | Post-ID, Text, Bild | Erste Wahl. Weitere Instanzen über `NITTER_HOSTS` als Reserve. |
 | `syndication.twitter.com` | dasselbe | Twitters eigener Embed-Endpunkt, kein Login. Antwortet zurzeit fast durchgehend mit `429`. |
-| `api.fxtwitter.com` | Post-Zähler | Letzte Rettung. Steigt der Zähler, kommt eine Meldung mit Profil-Link, aber ohne Text. |
+| `api.fxtwitter.com` | Beitragszähler | Letzte Rettung, wenn beide Feeds blocken: knappe Meldung ohne Inhalt. |
 
-**Retweets werden standardmäßig ignoriert.** Bei aktiven Accounts sind sie die
-deutliche Mehrheit im Feed – bei @WARDOGS aktuell 17 von 20 Einträgen. Mit
-`INCLUDE_RETWEETS=1` kommen sie mit. Kleine Einschränkung dabei: Der Watcher
+Der Haken: Nitter spiegelt X nicht in Echtzeit, gemessen hinkt der Feed **10 bis 25
+Minuten** hinterher. Blocken die Feeds ganz, während der Zähler einen neuen Beitrag
+meldet, fragt der Watcher bis zu fünfmal im Abstand von 20 Sekunden nach, bevor er
+auf die knappe Meldung zurückfällt.
+
+Mit `INCLUDE_RETWEETS=1` kommen Retweets mit. Kleine Einschränkung: Der Watcher
 vergleicht Post-IDs, und ein Retweet trägt die ID des *ursprünglichen* Posts. Wird
 etwas Älteres geteilt, kann die Meldung ausbleiben. Für eigene Posts stimmt der
 Vergleich immer.
 
-Das Rate-Limit der Timeline gilt nur zeitweise. Meldet der Zähler einen neuen Post,
-die Timeline blockt aber gerade, fragt der Watcher sie deshalb noch bis zu fünfmal im
-Abstand von 20 Sekunden nach – kommt einer davon durch, gibt es die ausführliche
-Meldung statt der knappen. Auf ruhigen Läufen passiert das nicht, die bleiben schnell.
+### In beiden Fällen
 
-Schlagen beide fehl, bricht der Lauf ohne Meldung ab und der Stand bleibt unverändert –
-es geht also nichts verloren, der nächste Lauf holt es nach.
+Ist keine Quelle erreichbar, endet der Lauf ohne Meldung und der Stand bleibt
+unverändert – es geht nichts verloren, der nächste Lauf holt es nach.
 
 ## Einrichtung
 
@@ -78,6 +95,11 @@ Bestätigung („Überwachung ist aktiv"). Ab dem zweiten Lauf kommen echte Post
 - **Anderer Account:** `X_HANDLE` in `.github/workflows/watch.yml` ändern (ohne `@`).
   Beim nächsten Lauf startet die Überwachung für den neuen Account von vorne.
 - **Anderer Takt:** den `cron`-Ausdruck in derselben Datei anpassen.
+- **Betriebsart:** `NOTIFY_MODE` auf `fast` oder `rich` (siehe oben).
+- **Reaktionszeit im Schnellmodus:** `CHECK_LOOPS` (Standard 5) und `CHECK_PAUSE`
+  in Sekunden (Standard 60). Fünf Runden à 60 s decken rund vier Minuten pro Job ab.
+  Mehr Runden schließen Lücken zwischen verzögerten Cron-Läufen, lassen den Job aber
+  länger laufen – bei öffentlichen Repos kostenlos, bei privaten nicht.
 - **Mehr/weniger Meldungen pro Lauf:** `MAX_POSTS` als `env` ergänzen (Standard 5).
   Schützt davor, dass ein Nachhol-Lauf 20 Meldungen auf einmal feuert.
 - **Nachfassen bei blockierten Quellen:** `TIMELINE_RETRIES` (Standard 5) und

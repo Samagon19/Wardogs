@@ -16,6 +16,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -29,6 +30,12 @@ jobs:
           # TESTBETRIEB: Reuters postet etwa alle 12 Minuten, damit sich die
           # Zustellung schnell pruefen laesst. Danach zurueck auf WARDOGS.
           X_HANDLE: Reuters
+          # Tempo vor Inhalt: der Zaehler loest sofort aus, Text und Bild
+          # entfallen. Fuenf Pruefungen im Minutentakt decken die Luecke
+          # zwischen den Cron-Laeufen ab.
+          NOTIFY_MODE: fast
+          CHECK_LOOPS: "5"
+          CHECK_PAUSE: "60"
         run: python watcher.py
 
       - name: Stand sichern
