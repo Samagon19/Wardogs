@@ -16,7 +16,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -31,11 +31,13 @@ jobs:
           # Zustellung schnell pruefen laesst. Danach zurueck auf WARDOGS.
           X_HANDLE: Reuters
           # Tempo vor Inhalt: der Zaehler loest sofort aus, Text und Bild
-          # entfallen. Fuenf Pruefungen im Minutentakt decken die Luecke
-          # zwischen den Cron-Laeufen ab.
+          # entfallen. Alle 15 Sekunden pruefen, und zwar 50 Mal - ein Job
+          # deckt damit rund 12 Minuten ab. Weil GitHub pro concurrency-Gruppe
+          # einen Lauf wartend haelt, loest der naechste ab, sobald dieser
+          # endet: durchgehende Ueberwachung statt Luecken zwischen Cron-Laeufen.
           NOTIFY_MODE: fast
-          CHECK_LOOPS: "5"
-          CHECK_PAUSE: "60"
+          CHECK_LOOPS: "50"
+          CHECK_PAUSE: "15"
         run: python watcher.py
 
       - name: Stand sichern

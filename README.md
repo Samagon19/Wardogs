@@ -96,10 +96,13 @@ Bestätigung („Überwachung ist aktiv"). Ab dem zweiten Lauf kommen echte Post
   Beim nächsten Lauf startet die Überwachung für den neuen Account von vorne.
 - **Anderer Takt:** den `cron`-Ausdruck in derselben Datei anpassen.
 - **Betriebsart:** `NOTIFY_MODE` auf `fast` oder `rich` (siehe oben).
-- **Reaktionszeit im Schnellmodus:** `CHECK_LOOPS` (Standard 5) und `CHECK_PAUSE`
-  in Sekunden (Standard 60). Fünf Runden à 60 s decken rund vier Minuten pro Job ab.
-  Mehr Runden schließen Lücken zwischen verzögerten Cron-Läufen, lassen den Job aber
-  länger laufen – bei öffentlichen Repos kostenlos, bei privaten nicht.
+- **Reaktionszeit im Schnellmodus:** `CHECK_PAUSE` in Sekunden bestimmt sie direkt –
+  eingestellt sind 15 s, also im Mittel rund 8 Sekunden vom Post bis Discord.
+  `CHECK_LOOPS` (50) legt fest, wie lange ein Job durchhält: 50 × 15 s ≈ 12 Minuten.
+  Nach unten ist bei etwa 10 s Schluss, darunter bringt es nichts mehr – dann
+  dominiert die Zeit, die X selbst braucht, bis der Zähler steht.
+  Bei privaten Repos die Laufzeit im Blick behalten, dort sind Actions-Minuten
+  gedeckelt; bei öffentlichen Repos ist es kostenlos.
 - **Mehr/weniger Meldungen pro Lauf:** `MAX_POSTS` als `env` ergänzen (Standard 5).
   Schützt davor, dass ein Nachhol-Lauf 20 Meldungen auf einmal feuert.
 - **Nachfassen bei blockierten Quellen:** `TIMELINE_RETRIES` (Standard 5) und
