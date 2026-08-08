@@ -7,9 +7,11 @@ Kein API-Key noetig. Zwei Quellen, in dieser Reihenfolge:
   2. api.fxtwitter.com       -> nur der Post-Zaehler (funktioniert auch von Cloud-IPs)
 
 Konfiguration ueber Umgebungsvariablen:
-  DISCORD_WEBHOOK  (Pflicht)  Webhook-URL des Discord-Kanals
-  X_HANDLE         (optional) Account ohne @, Standard: WARDOGS
-  MAX_POSTS        (optional) Hoechstzahl Meldungen pro Lauf, Standard: 5
+  DISCORD_WEBHOOK    (Pflicht)  Webhook-URL des Discord-Kanals
+  X_HANDLE           (optional) Account ohne @, Standard: WARDOGS
+  MAX_POSTS          (optional) Hoechstzahl Meldungen pro Lauf, Standard: 5
+  TIMELINE_RETRIES   (optional) Nachfass-Versuche bei erkanntem Post, Standard: 5
+  TIMELINE_PAUSE     (optional) Sekunden zwischen den Versuchen, Standard: 20
 """
 
 import json
@@ -25,6 +27,8 @@ from pathlib import Path
 HANDLE = os.environ.get("X_HANDLE", "WARDOGS").strip().lstrip("@")
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK", "").strip()
 MAX_POSTS = int(os.environ.get("MAX_POSTS", "5"))
+TIMELINE_RETRIES = int(os.environ.get("TIMELINE_RETRIES", "5"))
+TIMELINE_PAUSE = int(os.environ.get("TIMELINE_PAUSE", "20"))
 STATE_FILE = Path(__file__).resolve().parent / "state.json"
 
 UA = (
@@ -88,6 +92,17 @@ def timeline():
     walk(json.loads(match.group(1)))
     newest_first = sorted(found.values(), key=lambda t: int(t["id_str"]), reverse=True)
     return [as_post(tweet) for tweet in newest_first]
+
+
+def read_timeline():
+    """timeline() ohne Ausnahmen - leere Liste, wenn die Quelle gerade blockt."""
+    try:
+        posts = timeline()
+        print(f"Timeline: {len(posts)} Posts gelesen")
+        return posts
+    except Exception as error:
+        print(f"Timeline nicht verfuegbar: {error}")
+        return []
 
 
 def profile():
@@ -168,19 +183,36 @@ def main():
     state = load_state()
     first_run = not state
 
-    posts = []
-    try:
-        posts = timeline()
-        print(f"Timeline: {len(posts)} Posts gelesen")
-    except Exception as error:
-        print(f"Timeline nicht verfuegbar ({error}) - nutze den Post-Zaehler")
-
     prof = None
     try:
         prof = profile()
         print(f"Profil: {prof['count']} Posts insgesamt")
     except Exception as error:
         print(f"Profil nicht verfuegbar: {error}")
+
+    posts = read_timeline()
+
+    if not posts:
+        # Das Rate-Limit der Timeline ist zeitlich begrenzt. Wenn der Zaehler
+        # sagt, dass es gerade wirklich etwas zu melden gibt, lohnt sich
+        # hartnaeckiges Nachfassen - sonst nur ein einzelner Nachschlag.
+        etwas_neu = (
+            prof is not None
+            and state.get("count") is not None
+            and prof["count"] > state["count"]
+        )
+        if etwas_neu:
+            versuche = TIMELINE_RETRIES
+        elif state.get("last_id") is None:
+            versuche = 1  # Ausgangspunkt nachholen, ohne die Quelle zu fluten
+        else:
+            versuche = 0
+        for nummer in range(1, versuche + 1):
+            print(f"Nachfassen {nummer}/{versuche} in {TIMELINE_PAUSE}s ...")
+            time.sleep(TIMELINE_PAUSE)
+            posts = read_timeline()
+            if posts:
+                break
 
     if not posts and prof is None:
         sys.exit("Keine Quelle erreichbar - Lauf abgebrochen, State bleibt unveraendert.")

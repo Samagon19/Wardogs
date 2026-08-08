@@ -14,6 +14,11 @@ zuletzt gemerkten Stand in `state.json`. Zwei Quellen, in dieser Reihenfolge:
 | `syndication.twitter.com` | Post-ID, Text, Bild | Twitters eigener Embed-Endpunkt, kein Login. Cloud-IPs bekommen manchmal ein Rate-Limit. |
 | `api.fxtwitter.com` | Post-Zähler | Fallback. Steigt der Zähler, kommt eine Meldung mit Profil-Link (ohne Text). |
 
+Das Rate-Limit der Timeline gilt nur zeitweise. Meldet der Zähler einen neuen Post,
+die Timeline blockt aber gerade, fragt der Watcher sie deshalb noch bis zu fünfmal im
+Abstand von 20 Sekunden nach – kommt einer davon durch, gibt es die ausführliche
+Meldung statt der knappen. Auf ruhigen Läufen passiert das nicht, die bleiben schnell.
+
 Schlagen beide fehl, bricht der Lauf ohne Meldung ab und der Stand bleibt unverändert –
 es geht also nichts verloren, der nächste Lauf holt es nach.
 
@@ -67,6 +72,9 @@ Bestätigung („Überwachung ist aktiv"). Ab dem zweiten Lauf kommen echte Post
 - **Anderer Takt:** den `cron`-Ausdruck in derselben Datei anpassen.
 - **Mehr/weniger Meldungen pro Lauf:** `MAX_POSTS` als `env` ergänzen (Standard 5).
   Schützt davor, dass ein Nachhol-Lauf 20 Meldungen auf einmal feuert.
+- **Nachfassen bei blockierter Timeline:** `TIMELINE_RETRIES` (Standard 5) und
+  `TIMELINE_PAUSE` in Sekunden (Standard 20). Höhere Werte erhöhen die Chance auf
+  Text und Bild in der Meldung, verlängern aber den Lauf.
 
 ## Lokal testen
 
